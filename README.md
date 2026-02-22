@@ -12,7 +12,13 @@ RepoMesh MCP is a repo-scoped coordination and memory layer for multi-agent soft
 ## Quick Start
 1. Install prerequisites: Node.js, pnpm, Python 3.12, Docker Desktop.
 2. Run `pnpm install` at repo root.
-3. Run `repomesh init` from `apps/cli` build output once built.
+3. Run `pnpm build`.
+4. Initialize RepoMesh in the repository root:
+   - `node apps/cli/dist/index.js init`
+5. Start services:
+   - `node apps/cli/dist/index.js up`
+6. Check health:
+   - `node apps/cli/dist/index.js doctor`
 
 ## Repository Layout
 - `apps/cli`: CLI package.
@@ -20,3 +26,16 @@ RepoMesh MCP is a repo-scoped coordination and memory layer for multi-agent soft
 - `packages/shared-contracts`: shared schemas/types.
 - `infra/docker`: compose stack.
 - `docs`: API, MCP, and ops docs.
+
+## MVP CLI Commands
+- `repomesh init`
+- `repomesh up`
+- `repomesh down`
+- `repomesh doctor`
+- `repomesh status`
+- `repomesh mcp`
+- `repomesh task create`
+- `repomesh task list`
+- `repomesh task claim <task-id>`
+- `repomesh logs`
+- `repomesh context <task-id>`

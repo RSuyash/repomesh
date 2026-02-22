@@ -1,0 +1,25 @@
+{
+  "name": "@repomesh/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "repomesh": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "echo 'No CLI linter configured yet'",
+    "test": "tsx --test src/tests/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.14.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}

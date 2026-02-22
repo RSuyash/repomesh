@@ -6,12 +6,24 @@
 - Python 3.12+
 - Docker Desktop (daemon running)
 
-## Setup
-1. Copy `infra/docker/.env.example` to `infra/docker/.env`.
-2. Run `pnpm install`.
-3. Build packages with `pnpm build`.
-4. Start services: `docker compose --env-file infra/docker/.env -f infra/docker/docker-compose.yml up -d`.
+## Bootstrap
+1. `pnpm install`
+2. `pnpm build`
+3. `pnpm test`
+
+## RepoMesh CLI Flow
+1. `pnpm --filter @repomesh/cli build`
+2. `node apps/cli/dist/index.js init`
+3. `node apps/cli/dist/index.js up`
+4. `node apps/cli/dist/index.js doctor`
+5. `node apps/cli/dist/index.js status`
+
+## Docker Compose
+- Stack file: `infra/docker/docker-compose.yml`
+- Env file: `infra/docker/.env`
+- If `.env` does not exist, `repomesh init` copies from `.env.example`.
 
 ## Troubleshooting
 - If Docker checks fail on Windows, start Docker Desktop and confirm `docker info` works.
-- Use `repomesh doctor` to verify daemon, compose file, and API health.
+- API auth failures usually mean token mismatch. Use `repomesh mcp` to inspect token.
+- Run `POST /v1/recovery/reconcile` when validating stale lease recovery.
