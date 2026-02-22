@@ -21,6 +21,7 @@ What this does automatically:
 - installs dependencies
 - builds all packages
 - initializes RepoMesh config
+- generates `.repomesh/mcp-servers.json` for MCP clients
 - starts Docker services
 - runs health checks
 - prints MCP connection details

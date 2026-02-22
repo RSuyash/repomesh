@@ -73,9 +73,33 @@ Step "Syncing API token" {
   if (-not (Test-Path $tokenPath)) {
     throw "Token file not found at $tokenPath"
   }
-  $token = (Get-Content $tokenPath -Raw).Trim()
+  $script:token = (Get-Content $tokenPath -Raw).Trim()
   $envPath = Join-Path $repoRoot "infra\docker\.env"
-  Set-EnvVar -FilePath $envPath -Key "REPO_MESH_LOCAL_TOKEN" -Value $token
+  Set-EnvVar -FilePath $envPath -Key "REPO_MESH_LOCAL_TOKEN" -Value $script:token
+}
+
+Step "Generating MCP JSON config" {
+  $mcpConfigPath = Join-Path $repoRoot ".repomesh\mcp-servers.json"
+  $launcherPath = Join-Path $repoRoot "scripts\repomesh_mcp_stdio.py"
+  $config = @{
+    mcpServers = @{
+      repomesh_http = @{
+        transport = "http"
+        url = "http://127.0.0.1:8787/mcp/http"
+        headers = @{
+          "x-repomesh-token" = $script:token
+        }
+      }
+      repomesh_stdio = @{
+        transport = "stdio"
+        command = "python"
+        args = @($launcherPath)
+      }
+    }
+  }
+  $json = $config | ConvertTo-Json -Depth 10
+  Set-Content -Path $mcpConfigPath -Value $json
+  Write-Host "Wrote MCP config: $mcpConfigPath"
 }
 
 Step "Starting services" {
@@ -83,7 +107,17 @@ Step "Starting services" {
 }
 
 Step "Health check" {
-  Run "node" @("apps/cli/dist/index.js", "doctor")
+  $maxAttempts = 30
+  for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+    $raw = node apps/cli/dist/index.js doctor
+    $status = $raw | ConvertFrom-Json
+    if ($status.api_health -eq $true) {
+      Write-Host ($raw | Out-String)
+      return
+    }
+    Start-Sleep -Seconds 2
+  }
+  throw "API health check did not become ready in time."
 }
 
 Step "MCP connection details" {
