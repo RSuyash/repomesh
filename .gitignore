@@ -25,6 +25,8 @@ coverage/
 # Local runtime
 .repomesh/
 .logs/
+.gemini/
+references/
 
 # Docker
 *.pid

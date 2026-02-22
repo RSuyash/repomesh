@@ -79,27 +79,7 @@ Step "Syncing API token" {
 }
 
 Step "Generating MCP JSON config" {
-  $mcpConfigPath = Join-Path $repoRoot ".repomesh\mcp-servers.json"
-  $launcherPath = Join-Path $repoRoot "scripts\repomesh_mcp_stdio.py"
-  $config = @{
-    mcpServers = @{
-      repomesh_http = @{
-        transport = "http"
-        url = "http://127.0.0.1:8787/mcp/http"
-        headers = @{
-          "x-repomesh-token" = $script:token
-        }
-      }
-      repomesh_stdio = @{
-        transport = "stdio"
-        command = "python"
-        args = @($launcherPath)
-      }
-    }
-  }
-  $json = $config | ConvertTo-Json -Depth 10
-  Set-Content -Path $mcpConfigPath -Value $json
-  Write-Host "Wrote MCP config: $mcpConfigPath"
+  Run "node" @("apps/cli/dist/index.js", "mcp", "--write", "--client", "qwen")
 }
 
 Step "Starting services" {

@@ -13,6 +13,7 @@
 ## Qwen CLI MCP Smoke
 - Run from repo root: `D:\Projects\RepoMesh MCP`
 - Run `pnpm oneclick` to generate `.repomesh/mcp-servers.json`
+- Optional: regenerate MCP config with `node apps/cli/dist/index.js mcp --write`
 - Add server: `qwen mcp add repomesh-stdio python scripts/repomesh_mcp_stdio.py`
 - Verify: `qwen mcp list`
 - One-shot prompt check:

@@ -6,6 +6,7 @@ import { Command } from 'commander';
 import { apiRequest } from './lib/api.js';
 import { dockerAvailable, runDockerCompose } from './lib/docker.js';
 import { initRepoMesh, readConfig, resolvePaths } from './lib/config.js';
+import { buildMcpServersConfig, mcpClientHints, writeMcpConfig } from './lib/mcp.js';
 import { printJson } from './lib/output.js';
 
 const program = new Command();
@@ -97,12 +98,38 @@ program
 program
   .command('mcp')
   .description('Show MCP connection details')
-  .action(() => {
+  .option('--write', 'Write .repomesh/mcp-servers.json')
+  .option('--client <client>', 'Show client-specific hints (qwen|json)', 'json')
+  .action((options: { write?: boolean; client: string }) => {
     const { config, token } = readConfig();
-    printJson({
+    const paths = resolvePaths();
+    const mcpConfig = buildMcpServersConfig(config, token, paths.repoRoot);
+    const hints = mcpClientHints(paths.repoRoot);
+    const out: Record<string, unknown> = {
       mcp_http_url: config.mcp_http_url,
       mcp_stdio_command: config.mcp_stdio_command,
-      token
+      token,
+      mcp_servers: mcpConfig
+    };
+
+    if (options.write) {
+      out.mcp_config_path = writeMcpConfig(paths, mcpConfig);
+    }
+
+    if (options.client === 'qwen') {
+      out.client = 'qwen';
+      out.setup = {
+        remove: 'qwen mcp remove repomesh-stdio',
+        add: hints.qwen_add,
+        test: hints.qwen_test
+      };
+    } else {
+      out.client = 'json';
+      out.setup = { note: hints.json_note };
+    }
+
+    printJson({
+      ...out
     });
   });
 

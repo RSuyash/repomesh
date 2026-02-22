@@ -5,6 +5,7 @@ RepoMesh now generates a single MCP config file at:
 
 Generate it with:
 - `pnpm oneclick`
+- or `node apps/cli/dist/index.js mcp --write`
 
 ## Generated JSON format
 
@@ -31,19 +32,18 @@ Generate it with:
 
 ## Qwen CLI
 
-Qwen currently uses `qwen mcp add/remove/list`, not direct JSON import.
-Use the generated stdio launcher:
+Print exact commands:
+
+```powershell
+node apps/cli/dist/index.js mcp --client qwen
+```
+
+Then run setup:
 
 ```powershell
 qwen mcp remove repomesh-stdio
 qwen mcp add repomesh-stdio python scripts/repomesh_mcp_stdio.py
 qwen mcp list
-```
-
-Then test:
-
-```powershell
-qwen -p "Call task.list from repomesh-stdio and return only JSON." --allowed-mcp-server-names repomesh-stdio --output-format json
 ```
 
 ## Other MCP clients
@@ -52,3 +52,9 @@ For clients that accept `mcpServers` JSON directly, copy from `.repomesh/mcp-ser
 Use:
 - `repomesh_http` for HTTP MCP transport
 - `repomesh_stdio` for stdio MCP transport
+
+Print JSON-ready output:
+
+```powershell
+node apps/cli/dist/index.js mcp --client json
+```

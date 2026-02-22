@@ -26,6 +26,11 @@ What this does automatically:
 - runs health checks
 - prints MCP connection details
 
+## MCP Client Onboarding
+- Write MCP config manually anytime: `node apps/cli/dist/index.js mcp --write`
+- Get Qwen setup commands: `node apps/cli/dist/index.js mcp --client qwen`
+- Get JSON-based client info (Codex/Gemini-compatible MCP clients): `node apps/cli/dist/index.js mcp --client json`
+
 ## Repository Layout
 - `apps/cli`: CLI package.
 - `apps/api`: API service and MCP server.
