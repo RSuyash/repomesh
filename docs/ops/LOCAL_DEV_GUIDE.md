@@ -7,6 +7,13 @@
 - Docker Desktop (daemon running)
 
 ## Bootstrap
+### One-click setup (recommended)
+1. `pnpm oneclick`
+
+Windows double-click option:
+- `oneclick.bat`
+
+### Manual setup
 1. `pnpm install`
 2. `pnpm build`
 3. `pnpm test`
