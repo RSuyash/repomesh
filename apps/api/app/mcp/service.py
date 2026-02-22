@@ -8,6 +8,101 @@ from app.services.events import EventService
 from app.services.locks import LockService
 from app.services.tasks import TaskService
 
+TOOL_DEFINITIONS = [
+    {
+        'name': 'agent.register',
+        'description': 'Register an agent instance in RepoMesh.',
+        'inputSchema': {
+            'type': 'object',
+            'required': ['name', 'type'],
+            'properties': {
+                'name': {'type': 'string'},
+                'type': {'type': 'string'},
+                'capabilities': {'type': 'object'},
+                'repo_id': {'type': ['string', 'null']},
+            },
+        },
+    },
+    {
+        'name': 'agent.heartbeat',
+        'description': 'Update agent heartbeat and status.',
+        'inputSchema': {
+            'type': 'object',
+            'required': ['agent_id', 'status'],
+            'properties': {
+                'agent_id': {'type': 'string'},
+                'status': {'type': 'string'},
+                'current_task': {'type': ['string', 'null']},
+            },
+        },
+    },
+    {'name': 'agent.list', 'description': 'List agents.', 'inputSchema': {'type': 'object', 'properties': {'repo_id': {'type': ['string', 'null']}}}},
+    {
+        'name': 'task.create',
+        'description': 'Create a task.',
+        'inputSchema': {
+            'type': 'object',
+            'required': ['goal'],
+            'properties': {
+                'goal': {'type': 'string'},
+                'description': {'type': 'string'},
+                'scope': {'type': 'object'},
+                'priority': {'type': 'integer'},
+                'acceptance_criteria': {'type': ['string', 'null']},
+                'repo_id': {'type': ['string', 'null']},
+            },
+        },
+    },
+    {'name': 'task.list', 'description': 'List tasks.', 'inputSchema': {'type': 'object', 'properties': {'status': {'type': 'string'}, 'scope': {'type': 'string'}, 'assignee': {'type': 'string'}}}},
+    {
+        'name': 'task.claim',
+        'description': 'Claim a task with lease.',
+        'inputSchema': {
+            'type': 'object',
+            'required': ['task_id', 'agent_id', 'resource_key'],
+            'properties': {
+                'task_id': {'type': 'string'},
+                'agent_id': {'type': 'string'},
+                'resource_key': {'type': 'string'},
+                'lease_ttl': {'type': 'integer'},
+            },
+        },
+    },
+    {
+        'name': 'task.update',
+        'description': 'Update task fields.',
+        'inputSchema': {
+            'type': 'object',
+            'required': ['task_id'],
+            'properties': {
+                'task_id': {'type': 'string'},
+                'status': {'type': 'string'},
+                'progress': {'type': 'integer'},
+                'summary': {'type': 'string'},
+                'blocked_reason': {'type': 'string'},
+            },
+        },
+    },
+    {
+        'name': 'lock.acquire',
+        'description': 'Acquire a resource lock.',
+        'inputSchema': {
+            'type': 'object',
+            'required': ['resource_key', 'agent_id'],
+            'properties': {
+                'resource_key': {'type': 'string'},
+                'agent_id': {'type': 'string'},
+                'ttl': {'type': 'integer'},
+            },
+        },
+    },
+    {'name': 'lock.renew', 'description': 'Renew a lock.', 'inputSchema': {'type': 'object', 'required': ['lock_id', 'agent_id'], 'properties': {'lock_id': {'type': 'string'}, 'agent_id': {'type': 'string'}, 'ttl': {'type': 'integer'}}}},
+    {'name': 'lock.release', 'description': 'Release a lock.', 'inputSchema': {'type': 'object', 'required': ['lock_id', 'agent_id'], 'properties': {'lock_id': {'type': 'string'}, 'agent_id': {'type': 'string'}}}},
+    {'name': 'event.log', 'description': 'Log an event.', 'inputSchema': {'type': 'object', 'required': ['type'], 'properties': {'type': {'type': 'string'}, 'payload': {'type': 'object'}, 'severity': {'type': 'string'}, 'task_id': {'type': ['string', 'null']}, 'agent_id': {'type': ['string', 'null']}, 'repo_id': {'type': ['string', 'null']}}}},
+    {'name': 'event.list', 'description': 'List events.', 'inputSchema': {'type': 'object', 'properties': {'task_id': {'type': ['string', 'null']}, 'agent_id': {'type': ['string', 'null']}, 'type': {'type': ['string', 'null']}, 'limit': {'type': 'integer'}}}},
+    {'name': 'context.bundle', 'description': 'Build a compact context bundle for a task.', 'inputSchema': {'type': 'object', 'required': ['task_id'], 'properties': {'task_id': {'type': 'string'}, 'mode': {'type': 'string'}, 'include_recent': {'type': 'boolean'}}}},
+]
+
 
 class MCPToolService:
     def __init__(self, db: Session):
@@ -132,3 +227,7 @@ class MCPToolService:
             return bundle
 
         raise ValueError(f'Unknown tool: {tool_name}')
+
+    @staticmethod
+    def definitions() -> list[dict]:
+        return TOOL_DEFINITIONS
