@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://repomesh.dev/schemas/context-bundle.json",
+  "type": "object",
+  "required": ["task", "scope_files", "recent_events", "lock_status", "placeholders"],
+  "properties": {
+    "task": {
+      "type": "object",
+      "required": ["id", "goal", "description", "status", "priority", "progress"],
+      "properties": {
+        "id": {"type": "string"},
+        "goal": {"type": "string"},
+        "description": {"type": "string"},
+        "status": {"type": "string"},
+        "priority": {"type": "integer"},
+        "acceptance_criteria": {"type": ["string", "null"]},
+        "assignee_agent_id": {"type": ["string", "null"]},
+        "progress": {"type": "integer", "minimum": 0, "maximum": 100}
+      }
+    },
+    "scope_files": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "recent_events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "severity", "payload", "created_at"],
+        "properties": {
+          "id": {"type": "string"},
+          "type": {"type": "string"},
+          "severity": {"type": "string"},
+          "payload": {"type": "object"},
+          "created_at": {"type": "string", "format": "date-time"}
+        }
+      }
+    },
+    "lock_status": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "resource_key", "owner_agent_id", "state", "expires_at"],
+        "properties": {
+          "id": {"type": "string"},
+          "resource_key": {"type": "string"},
+          "owner_agent_id": {"type": "string"},
+          "state": {"type": "string"},
+          "expires_at": {"type": "string", "format": "date-time"}
+        }
+      }
+    },
+    "placeholders": {
+      "type": "object"
+    }
+  }
+}
