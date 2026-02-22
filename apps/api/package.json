@@ -1,0 +1,11 @@
+{
+  "name": "@repomesh/api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "python -m compileall app",
+    "lint": "echo 'No python linter configured yet'",
+    "test": "pytest",
+    "typecheck": "python -m compileall app"
+  }
+}
