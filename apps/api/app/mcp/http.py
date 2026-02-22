@@ -4,15 +4,15 @@ import json
 
 from fastapi import APIRouter, Depends
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db_session, require_auth
+from app.api.deps import get_db_session
 from app.schemas.common import MCPCallRequest
 from app.services.errors import AppError
 from app.mcp.service import MCPToolService
 
-router = APIRouter(prefix='/mcp', tags=['mcp'], dependencies=[Depends(require_auth)])
+router = APIRouter(prefix='/mcp', tags=['mcp'])
 
 
 @router.get('/tools')
@@ -42,8 +42,11 @@ def _response(request_id: str | int | None, result: dict | None = None, error: d
     return JSONResponse(content=jsonable_encoder(body))
 
 
-@router.post('/http')
-def mcp_http_call(payload: MCPCallRequest, db: Session = Depends(get_db_session)) -> JSONResponse:
+@router.post('/http', response_model=None)
+def mcp_http_call(payload: MCPCallRequest, db: Session = Depends(get_db_session)):
+    if payload.id is None and payload.method.startswith('notifications/'):
+        return Response(status_code=204)
+
     if payload.method == 'initialize':
         return _response(payload.id, result=_initialize_result())
 
@@ -51,7 +54,7 @@ def mcp_http_call(payload: MCPCallRequest, db: Session = Depends(get_db_session)
         return _response(payload.id, result={'tools': MCPToolService.definitions()})
 
     if payload.method == 'notifications/initialized':
-        return _response(payload.id, result={})
+        return Response(status_code=204)
 
     if payload.method not in {'tool.call', 'tools/call'}:
         return _response(payload.id, error={'code': 'INVALID_METHOD', 'message': 'Unsupported method'})

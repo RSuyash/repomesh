@@ -20,6 +20,15 @@ export interface RepoMeshPaths {
   envPath: string;
 }
 
+function defaultConfig(paths: RepoMeshPaths): RepoMeshConfig {
+  return {
+    api_url: 'http://127.0.0.1:8787',
+    mcp_http_url: 'http://127.0.0.1:8787/mcp/http',
+    mcp_stdio_command: 'python -m app.mcp.stdio',
+    repo_id: path.basename(paths.repoRoot)
+  };
+}
+
 export function resolvePaths(cwd = process.cwd()): RepoMeshPaths {
   const repoRoot = cwd;
   const repomeshDir = path.join(repoRoot, '.repomesh');
@@ -50,13 +59,15 @@ export function initRepoMesh(cwd = process.cwd()): { paths: RepoMeshPaths; token
     fs.copyFileSync(paths.envExamplePath, paths.envPath);
   }
 
+  if (fs.existsSync(paths.configPath) && fs.existsSync(paths.tokenPath)) {
+    const configRaw = fs.readFileSync(paths.configPath, 'utf8');
+    const config = yaml.load(configRaw) as RepoMeshConfig;
+    const token = fs.readFileSync(paths.tokenPath, 'utf8').trim();
+    return { paths, token, config };
+  }
+
   const token = `rm_${crypto.randomUUID().replace(/-/g, '')}`;
-  const config: RepoMeshConfig = {
-    api_url: 'http://127.0.0.1:8787',
-    mcp_http_url: 'http://127.0.0.1:8787/mcp/http',
-    mcp_stdio_command: 'python -m app.mcp.stdio',
-    repo_id: path.basename(paths.repoRoot)
-  };
+  const config = defaultConfig(paths);
 
   fs.writeFileSync(paths.configPath, yaml.dump(config), 'utf8');
   fs.writeFileSync(paths.tokenPath, token, 'utf8');

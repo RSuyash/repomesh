@@ -19,3 +19,15 @@ test('initRepoMesh creates config and token', () => {
   assert.equal(loaded.config.api_url, 'http://127.0.0.1:8787');
   assert.ok(loaded.token.startsWith('rm_'));
 });
+
+test('initRepoMesh is idempotent and does not rotate token', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'repomesh-cli-idempotent-'));
+  fs.mkdirSync(path.join(tmp, 'infra', 'docker'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, 'infra', 'docker', '.env.example'), 'API_PORT=8787\n', 'utf8');
+
+  const first = initRepoMesh(tmp);
+  const second = initRepoMesh(tmp);
+
+  assert.equal(first.token, second.token);
+  assert.equal(first.config.api_url, second.config.api_url);
+});
