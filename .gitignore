@@ -8,6 +8,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 *.db
+*.egg-info/
 
 # Build/coverage
 dist/
