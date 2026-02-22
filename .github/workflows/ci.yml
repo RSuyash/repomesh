@@ -21,8 +21,14 @@ jobs:
           python-version: '3.12'
       - name: Install Node deps
         run: pnpm install --frozen-lockfile=false
+      - name: Install API Python deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e apps/api[dev]
       - name: Build
         run: pnpm build
+      - name: Typecheck
+        run: pnpm typecheck
       - name: Test
         run: pnpm test
       - name: Compose config check
