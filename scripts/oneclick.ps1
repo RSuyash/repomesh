@@ -37,6 +37,28 @@ function Set-EnvVar([string]$FilePath, [string]$Key, [string]$Value) {
   Set-Content -Path $FilePath -Value $content
 }
 
+function ConvertFrom-JsonSafe([string]$Text) {
+  if ([string]::IsNullOrWhiteSpace($Text)) {
+    return $null
+  }
+
+  try {
+    return ($Text | ConvertFrom-Json)
+  } catch {
+    $start = $Text.IndexOf("{")
+    $end = $Text.LastIndexOf("}")
+    if ($start -ge 0 -and $end -gt $start) {
+      $slice = $Text.Substring($start, $end - $start + 1)
+      try {
+        return ($slice | ConvertFrom-Json)
+      } catch {
+        return $null
+      }
+    }
+    return $null
+  }
+}
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 
@@ -89,9 +111,14 @@ Step "Starting services" {
 Step "Health check" {
   $maxAttempts = 30
   for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-    $raw = node apps/cli/dist/index.js doctor
-    $status = $raw | ConvertFrom-Json
-    if ($status.api_health -eq $true) {
+    $raw = node apps/cli/dist/index.js doctor 2>&1 | Out-String
+    $status = ConvertFrom-JsonSafe $raw
+    $apiHealthy = $false
+    if ($null -ne $status -and $status.PSObject.Properties.Name -contains "api_health") {
+      $apiHealthy = ($status.api_health -eq $true)
+    }
+
+    if ($apiHealthy) {
       Write-Host ($raw | Out-String)
       return
     }
