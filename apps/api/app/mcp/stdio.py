@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sys
 
-from app.db import SessionLocal
+from app.db import SessionLocal, create_all
 from app.mcp.service import MCPToolService
 from app.services.errors import AppError
 
@@ -40,6 +40,7 @@ def handle_line(raw: str) -> dict:
 
 
 def main() -> None:
+    create_all()
     for line in sys.stdin:
         line = line.strip()
         if not line:

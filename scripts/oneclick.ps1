@@ -19,6 +19,24 @@ function Run([string]$File, [string[]]$Arguments = @()) {
   }
 }
 
+function Set-EnvVar([string]$FilePath, [string]$Key, [string]$Value) {
+  if (-not (Test-Path $FilePath)) {
+    New-Item -ItemType File -Force -Path $FilePath | Out-Null
+  }
+
+  $content = Get-Content $FilePath -Raw
+  $pattern = "(?m)^$Key=.*$"
+  if ($content -match $pattern) {
+    $content = [Regex]::Replace($content, $pattern, "$Key=$Value")
+  } else {
+    if ($content.Length -gt 0 -and -not $content.EndsWith("`n")) {
+      $content += "`n"
+    }
+    $content += "$Key=$Value`n"
+  }
+  Set-Content -Path $FilePath -Value $content
+}
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 
@@ -48,6 +66,16 @@ Step "Building workspace" {
 
 Step "Initializing RepoMesh config" {
   Run "node" @("apps/cli/dist/index.js", "init")
+}
+
+Step "Syncing API token" {
+  $tokenPath = Join-Path $repoRoot ".repomesh\token"
+  if (-not (Test-Path $tokenPath)) {
+    throw "Token file not found at $tokenPath"
+  }
+  $token = (Get-Content $tokenPath -Raw).Trim()
+  $envPath = Join-Path $repoRoot "infra\docker\.env"
+  Set-EnvVar -FilePath $envPath -Key "REPO_MESH_LOCAL_TOKEN" -Value $token
 }
 
 Step "Starting services" {
