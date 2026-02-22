@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session, require_auth
-from app.schemas.common import MCPCallRequest, MCPCallResponse
+from app.schemas.common import MCPCallRequest
 from app.services.errors import AppError
 from app.mcp.service import MCPToolService
 
@@ -31,36 +33,45 @@ def _tool_result(result: dict) -> dict:
     return {'content': [{'type': 'text', 'text': text}], 'structuredContent': result, 'isError': False}
 
 
-@router.post('/http', response_model=MCPCallResponse)
-def mcp_http_call(payload: MCPCallRequest, db: Session = Depends(get_db_session)) -> MCPCallResponse:
+def _response(request_id: str | int | None, result: dict | None = None, error: dict | None = None) -> JSONResponse:
+    body: dict = {'jsonrpc': '2.0', 'id': request_id}
+    if error is not None:
+        body['error'] = error
+    else:
+        body['result'] = result or {}
+    return JSONResponse(content=jsonable_encoder(body))
+
+
+@router.post('/http')
+def mcp_http_call(payload: MCPCallRequest, db: Session = Depends(get_db_session)) -> JSONResponse:
     if payload.method == 'initialize':
-        return MCPCallResponse(id=payload.id, result=_initialize_result())
+        return _response(payload.id, result=_initialize_result())
 
     if payload.method == 'tools/list':
-        return MCPCallResponse(id=payload.id, result={'tools': MCPToolService.definitions()})
+        return _response(payload.id, result={'tools': MCPToolService.definitions()})
 
     if payload.method == 'notifications/initialized':
-        return MCPCallResponse(id=payload.id, result={})
+        return _response(payload.id, result={})
 
     if payload.method not in {'tool.call', 'tools/call'}:
-        return MCPCallResponse(id=payload.id, error={'code': 'INVALID_METHOD', 'message': 'Unsupported method'})
+        return _response(payload.id, error={'code': 'INVALID_METHOD', 'message': 'Unsupported method'})
 
     params = payload.params or {}
     tool_name = params.get('name')
     arguments = params.get('arguments', {})
 
     if not tool_name:
-        return MCPCallResponse(id=payload.id, error={'code': 'VALIDATION_ERROR', 'message': 'params.name is required'})
+        return _response(payload.id, error={'code': 'VALIDATION_ERROR', 'message': 'params.name is required'})
 
     try:
         result = MCPToolService(db).call(tool_name=tool_name, arguments=arguments)
         if payload.method == 'tools/call':
             result = _tool_result(result)
-        return MCPCallResponse(id=payload.id, result=result)
+        return _response(payload.id, result=result)
     except AppError as exc:
-        return MCPCallResponse(
-            id=payload.id,
+        return _response(
+            payload.id,
             error={'code': exc.code, 'message': exc.message, 'status': exc.status_code, 'details': exc.details or {}},
         )
     except ValueError as exc:
-        return MCPCallResponse(id=payload.id, error={'code': 'UNKNOWN_TOOL', 'message': str(exc)})
+        return _response(payload.id, error={'code': 'UNKNOWN_TOOL', 'message': str(exc)})

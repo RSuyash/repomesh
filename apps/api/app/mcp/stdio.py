@@ -9,12 +9,12 @@ from app.services.errors import AppError
 
 
 def _response(request_id: str | int | None, result: dict | None = None, error: dict | None = None) -> dict:
-    return {
-        'jsonrpc': '2.0',
-        'id': request_id,
-        'result': result,
-        'error': error,
-    }
+    payload: dict = {'jsonrpc': '2.0', 'id': request_id}
+    if error is not None:
+        payload['error'] = error
+    else:
+        payload['result'] = result or {}
+    return payload
 
 
 def _initialize_result() -> dict:
