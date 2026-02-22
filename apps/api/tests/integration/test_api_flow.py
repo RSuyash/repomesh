@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 
 def _headers() -> dict[str, str]:
     return {'x-repomesh-token': 'test-token'}
@@ -76,3 +78,51 @@ def test_mcp_http_parity(client):
     )
     assert lock.status_code == 200
     assert lock.json()['result']['resource_key'] == 'repo://frontend/audience-tab'
+
+
+def test_recovery_reclaims_expired_claims(client):
+    register = client.post(
+        '/v1/agents/register',
+        headers=_headers(),
+        json={'name': 'recovery-agent', 'type': 'cli', 'capabilities': {}},
+    )
+    assert register.status_code == 200
+    agent_id = register.json()['id']
+
+    lock = client.post(
+        '/v1/locks/acquire',
+        headers=_headers(),
+        json={'resource_key': 'repo://db/migrations', 'agent_id': agent_id, 'ttl': 5},
+    )
+    assert lock.status_code == 200
+
+    task = client.post(
+        '/v1/tasks',
+        headers=_headers(),
+        json={
+            'goal': 'Crash recovery test',
+            'description': 'simulate expired lease',
+            'scope': {'files': ['db/migrations/001.sql']},
+        },
+    )
+    assert task.status_code == 200
+    task_id = task.json()['id']
+
+    claim = client.post(
+        f'/v1/tasks/{task_id}/claim',
+        headers=_headers(),
+        json={'agent_id': agent_id, 'resource_key': 'repo://db/migrations', 'lease_ttl': 1},
+    )
+    assert claim.status_code == 200
+
+    time.sleep(1.2)
+
+    reconcile = client.post('/v1/recovery/reconcile', headers=_headers())
+    assert reconcile.status_code == 200
+    assert reconcile.json()['stale_claims'] >= 1
+
+    tasks = client.get('/v1/tasks', headers=_headers())
+    assert tasks.status_code == 200
+    matched = [item for item in tasks.json() if item['id'] == task_id]
+    assert matched
+    assert matched[0]['status'] == 'stalled'
