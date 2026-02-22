@@ -1,0 +1,72 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: repomesh-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-repomesh}
+      POSTGRES_USER: ${POSTGRES_USER:-repomesh}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-repomesh}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-repomesh} -d ${POSTGRES_DB:-repomesh}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: repomesh-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  qdrant:
+    image: qdrant/qdrant:v1.13.6
+    container_name: repomesh-qdrant
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:6333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    container_name: repomesh-api
+    environment:
+      DATABASE_URL: postgresql+psycopg://repomesh:repomesh@postgres:5432/repomesh
+      REDIS_URL: redis://redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+      REPO_MESH_LOCAL_TOKEN: ${REPO_MESH_LOCAL_TOKEN:-repomesh-local-token}
+      API_HOST: 0.0.0.0
+      API_PORT: 8787
+    ports:
+      - "${API_PORT:-8787}:8787"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8787/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  postgres_data:
+  qdrant_data:

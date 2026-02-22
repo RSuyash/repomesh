@@ -1,0 +1,32 @@
+# Node
+node_modules/
+pnpm-lock.yaml
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.mypy_cache/
+
+# Build/coverage
+dist/
+build/
+coverage/
+.coverage
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Local runtime
+.repomesh/
+.logs/
+
+# Docker
+*.pid
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,16 @@
+{
+  "name": "repomesh",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.18.3",
+  "scripts": {
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "format:check": "echo 'No formatter configured yet'"
+  },
+  "devDependencies": {
+    "turbo": "^2.8.10"
+  }
+}
