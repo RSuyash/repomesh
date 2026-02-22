@@ -13,6 +13,13 @@
 Windows double-click option:
 - `oneclick.bat`
 
+What one-click does:
+- installs dependencies
+- builds all packages
+- initializes RepoMesh config
+- syncs API token into Docker `.env`
+- starts services and runs health checks
+
 ### Manual setup
 1. `pnpm install`
 2. `pnpm build`
