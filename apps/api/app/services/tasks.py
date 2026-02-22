@@ -32,6 +32,7 @@ class TaskService:
         return task
 
     def list(self, *, status: str | None, scope: str | None, assignee: str | None) -> list[Task]:
+        self.expire_stale_claims()
         stmt = select(Task).order_by(Task.created_at.desc())
         if status:
             stmt = stmt.where(Task.status == status)
@@ -65,7 +66,7 @@ class TaskService:
                 status_code=400,
             )
 
-        self._expire_stale_claims(task_id)
+        self.expire_stale_claims(task_id)
         active_claim = self.db.execute(
             select(TaskClaim).where(
                 TaskClaim.task_id == task_id,
@@ -118,12 +119,13 @@ class TaskService:
         return task
 
     def get(self, task_id: str) -> Task:
+        self.expire_stale_claims(task_id=task_id)
         task = self.db.get(Task, task_id)
         if not task:
             raise AppError(code=ERROR_NOT_FOUND, message='Task not found', status_code=404)
         return task
 
-    def _expire_stale_claims(self, task_id: str | None = None) -> None:
+    def expire_stale_claims(self, task_id: str | None = None) -> int:
         now = utc_now()
         stmt = select(TaskClaim).where(and_(TaskClaim.state == 'active', TaskClaim.expires_at < now))
         if task_id:
@@ -137,3 +139,4 @@ class TaskService:
                 task.status = 'stalled'
         if stale_claims:
             self.db.commit()
+        return len(stale_claims)

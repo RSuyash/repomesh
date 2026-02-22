@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.api import agents, context, events, health, locks, tasks
+from app.api import agents, context, events, health, locks, recovery, tasks
 from app.config.logging import configure_logging
 from app.db import create_all
 from app.mcp import http
@@ -19,6 +19,7 @@ app.include_router(tasks.router)
 app.include_router(locks.router)
 app.include_router(events.router)
 app.include_router(context.router)
+app.include_router(recovery.router)
 app.include_router(http.router)
 
 

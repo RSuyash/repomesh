@@ -67,6 +67,7 @@ class AgentService:
         return agent
 
     def list(self, repo_id: str | None) -> list[Agent]:
+        self.mark_stale_sessions()
         stmt = select(Agent).order_by(Agent.created_at.desc())
         if repo_id:
             stmt = stmt.where(Agent.repo_id == repo_id)
