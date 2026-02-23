@@ -19,8 +19,8 @@ It gives you:
 From a fresh machine:
 
 ```bash
-git clone <YOUR_REPO_URL>
-cd <REPO_FOLDER>
+git clone https://github.com/RSuyash/repomesh.git
+cd repomesh
 pnpm oneclick
 ```
 
