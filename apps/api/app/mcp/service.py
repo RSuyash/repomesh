@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy.orm import Session
 
 from app.services.agents import AgentService
 from app.services.context import ContextService
+from app.services.errors import AppError, ERROR_VALIDATION
 from app.services.events import EventService
 from app.services.locks import LockService
 from app.services.tasks import TaskService
@@ -20,6 +23,8 @@ TOOL_DEFINITIONS = [
                 'type': {'type': 'string'},
                 'capabilities': {'type': 'object'},
                 'repo_id': {'type': ['string', 'null']},
+                'reuse_existing': {'type': 'boolean'},
+                'takeover_if_stale': {'type': 'boolean'},
             },
         },
     },
@@ -98,8 +103,10 @@ TOOL_DEFINITIONS = [
     },
     {'name': 'lock.renew', 'description': 'Renew a lock.', 'inputSchema': {'type': 'object', 'required': ['lock_id', 'agent_id'], 'properties': {'lock_id': {'type': 'string'}, 'agent_id': {'type': 'string'}, 'ttl': {'type': 'integer'}}}},
     {'name': 'lock.release', 'description': 'Release a lock.', 'inputSchema': {'type': 'object', 'required': ['lock_id', 'agent_id'], 'properties': {'lock_id': {'type': 'string'}, 'agent_id': {'type': 'string'}}}},
-    {'name': 'event.log', 'description': 'Log an event.', 'inputSchema': {'type': 'object', 'required': ['type'], 'properties': {'type': {'type': 'string'}, 'payload': {'type': 'object'}, 'severity': {'type': 'string'}, 'task_id': {'type': ['string', 'null']}, 'agent_id': {'type': ['string', 'null']}, 'repo_id': {'type': ['string', 'null']}}}},
-    {'name': 'event.list', 'description': 'List events.', 'inputSchema': {'type': 'object', 'properties': {'task_id': {'type': ['string', 'null']}, 'agent_id': {'type': ['string', 'null']}, 'type': {'type': ['string', 'null']}, 'limit': {'type': 'integer'}}}},
+    {'name': 'event.log', 'description': 'Log an event.', 'inputSchema': {'type': 'object', 'required': ['type'], 'properties': {'type': {'type': 'string'}, 'payload': {'type': 'object'}, 'severity': {'type': 'string'}, 'task_id': {'type': ['string', 'null']}, 'agent_id': {'type': ['string', 'null']}, 'repo_id': {'type': ['string', 'null']}, 'recipient_id': {'type': ['string', 'null']}, 'parent_message_id': {'type': ['string', 'null']}, 'channel': {'type': ['string', 'null']}}}},
+    {'name': 'event.list', 'description': 'List events with optional inbox/polling filters.', 'inputSchema': {'type': 'object', 'properties': {'task_id': {'type': ['string', 'null']}, 'agent_id': {'type': ['string', 'null']}, 'recipient_id': {'type': ['string', 'null']}, 'parent_message_id': {'type': ['string', 'null']}, 'channel': {'type': ['string', 'null']}, 'type': {'type': ['string', 'null']}, 'since': {'type': ['string', 'null'], 'description': 'ISO timestamp; return events strictly after this value'}, 'before': {'type': ['string', 'null'], 'description': 'ISO timestamp; return events strictly before this value'}, 'direction': {'type': 'string', 'enum': ['asc', 'desc']}, 'include_broadcast': {'type': 'boolean'}, 'include_payload': {'type': 'boolean'}, 'limit': {'type': 'integer'}}}},
+    {'name': 'event.inbox', 'description': 'List events addressed to a recipient (and optionally broadcast).', 'inputSchema': {'type': 'object', 'required': ['recipient_id'], 'properties': {'recipient_id': {'type': 'string'}, 'channel': {'type': ['string', 'null']}, 'type': {'type': ['string', 'null']}, 'since': {'type': ['string', 'null'], 'description': 'ISO timestamp; return events strictly after this value'}, 'before': {'type': ['string', 'null']}, 'direction': {'type': 'string', 'enum': ['asc', 'desc']}, 'include_broadcast': {'type': 'boolean'}, 'include_payload': {'type': 'boolean'}, 'limit': {'type': 'integer'}}}},
+    {'name': 'event.thread', 'description': 'Get a full message thread (root + replies).', 'inputSchema': {'type': 'object', 'required': ['message_id'], 'properties': {'message_id': {'type': 'string'}, 'limit': {'type': 'integer'}, 'include_payload': {'type': 'boolean'}}}},
     {'name': 'context.bundle', 'description': 'Build a compact context bundle for a task.', 'inputSchema': {'type': 'object', 'required': ['task_id'], 'properties': {'task_id': {'type': 'string'}, 'mode': {'type': 'string'}, 'include_recent': {'type': 'boolean'}}}},
 ]
 
@@ -113,6 +120,64 @@ class MCPToolService:
         self.events = EventService(db)
         self.context = ContextService(db)
 
+    @staticmethod
+    def _parse_dt(value: str | None) -> datetime | None:
+        if not value:
+            return None
+        normalized = value.replace('Z', '+00:00')
+        try:
+            return datetime.fromisoformat(normalized)
+        except ValueError as exc:
+            raise AppError(
+                code=ERROR_VALIDATION,
+                message='Invalid datetime format. Use ISO-8601, for example 2026-02-23T00:00:00Z',
+                status_code=400,
+                details={'value': value},
+            ) from exc
+
+    @staticmethod
+    def _format_event(event, include_payload: bool) -> dict:
+        item = {
+            'id': event.id,
+            'type': event.type,
+            'severity': event.severity,
+            'task_id': event.task_id,
+            'agent_id': event.agent_id,
+            'recipient_id': event.recipient_id,
+            'parent_message_id': event.parent_message_id,
+            'channel': event.channel,
+            'created_at': event.created_at.isoformat(),
+        }
+        if include_payload:
+            item['payload'] = event.payload
+        return item
+
+    def _list_events(self, arguments: dict, *, force_recipient: str | None = None) -> dict:
+        include_payload = bool(arguments.get('include_payload', False))
+        direction = arguments.get('direction', 'desc')
+        if direction not in {'asc', 'desc'}:
+            direction = 'desc'
+
+        events = self.events.list(
+            task_id=arguments.get('task_id'),
+            agent_id=arguments.get('agent_id'),
+            event_type=arguments.get('type'),
+            recipient_id=force_recipient or arguments.get('recipient_id'),
+            parent_message_id=arguments.get('parent_message_id'),
+            channel=arguments.get('channel'),
+            include_broadcast=bool(arguments.get('include_broadcast', force_recipient is not None)),
+            since=self._parse_dt(arguments.get('since')),
+            before=self._parse_dt(arguments.get('before')),
+            direction=direction,
+            limit=arguments.get('limit', 100),
+        )
+        latest_seen_at = max((event.created_at for event in events), default=None)
+        return {
+            'items': [self._format_event(e, include_payload=include_payload) for e in events],
+            'count': len(events),
+            'latest_seen_at': latest_seen_at.isoformat() if latest_seen_at else arguments.get('since'),
+        }
+
     def call(self, tool_name: str, arguments: dict) -> dict:
         if tool_name == 'agent.register':
             agent = self.agents.register(
@@ -120,6 +185,8 @@ class MCPToolService:
                 agent_type=arguments['type'],
                 capabilities=arguments.get('capabilities', {}),
                 repo_id=arguments.get('repo_id'),
+                reuse_existing=arguments.get('reuse_existing', True),
+                takeover_if_stale=arguments.get('takeover_if_stale', True),
             )
             return {'id': agent.id, 'name': agent.name, 'type': agent.type, 'status': agent.status}
 
@@ -201,21 +268,24 @@ class MCPToolService:
                 task_id=arguments.get('task_id'),
                 agent_id=arguments.get('agent_id'),
                 repo_id=arguments.get('repo_id'),
+                recipient_id=arguments.get('recipient_id'),
+                parent_message_id=arguments.get('parent_message_id'),
+                channel=arguments.get('channel'),
             )
             return {'id': event.id, 'type': event.type, 'severity': event.severity}
 
         if tool_name == 'event.list':
-            events = self.events.list(
-                task_id=arguments.get('task_id'),
-                agent_id=arguments.get('agent_id'),
-                event_type=arguments.get('type'),
-                limit=arguments.get('limit', 100),
-            )
+            return self._list_events(arguments)
+
+        if tool_name == 'event.inbox':
+            return self._list_events(arguments, force_recipient=arguments['recipient_id'])
+
+        if tool_name == 'event.thread':
+            include_payload = bool(arguments.get('include_payload', False))
+            events = self.events.thread(message_id=arguments['message_id'], limit=arguments.get('limit', 200))
             return {
-                'items': [
-                    {'id': e.id, 'type': e.type, 'severity': e.severity, 'task_id': e.task_id, 'created_at': e.created_at}
-                    for e in events
-                ]
+                'items': [self._format_event(e, include_payload=include_payload) for e in events],
+                'count': len(events),
             }
 
         if tool_name == 'context.bundle':

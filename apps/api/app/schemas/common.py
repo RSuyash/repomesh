@@ -20,6 +20,8 @@ class AgentRegisterRequest(BaseModel):
     type: str
     capabilities: dict[str, Any] = Field(default_factory=dict)
     repo_id: str | None = None
+    reuse_existing: bool = True
+    takeover_if_stale: bool = True
 
 
 class AgentHeartbeatRequest(BaseModel):
@@ -107,6 +109,9 @@ class EventLogRequest(BaseModel):
     type: str
     payload: dict[str, Any] = Field(default_factory=dict)
     severity: str = 'info'
+    recipient_id: str | None = None
+    parent_message_id: str | None = None
+    channel: str | None = None
     task_id: str | None = None
     agent_id: str | None = None
     repo_id: str | None = None
@@ -117,6 +122,9 @@ class EventResponse(BaseModel):
     repo_id: str | None
     agent_id: str | None
     task_id: str | None
+    recipient_id: str | None
+    parent_message_id: str | None
+    channel: str
     type: str
     severity: str
     payload: dict[str, Any]
