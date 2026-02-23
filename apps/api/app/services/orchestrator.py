@@ -11,6 +11,7 @@ from app.repositories.common import utc_now
 from app.services.agents import AgentService
 from app.services.errors import AppError, ERROR_CONFLICT
 from app.services.events import EventService
+from app.services.routing import RoutingPolicyService
 from app.services.tasks import TaskService
 
 
@@ -18,6 +19,7 @@ class OrchestratorEngine:
     def __init__(self, *, agent_name: str = 'repomesh-orchestrator', lease_ttl: int = 600):
         self.agent_name = agent_name
         self.lease_ttl = lease_ttl
+        self.routing = RoutingPolicyService()
 
     def ensure_orchestrator_agent(self, db: Session) -> Agent:
         return AgentService(db).register(
@@ -68,7 +70,12 @@ class OrchestratorEngine:
         worker_idx = 0
 
         for task in tasks:
-            worker = workers[worker_idx % len(workers)]
+            decision = self.routing.decide(task)
+            matching = [candidate for candidate in workers if self.routing.supports(candidate, decision)]
+            if matching:
+                worker = matching[worker_idx % len(matching)]
+            else:
+                worker = workers[worker_idx % len(workers)]
             worker_idx += 1
             resource_key = self._derive_resource_key(task)
             try:
@@ -92,6 +99,11 @@ class OrchestratorEngine:
                     'assigned_to_name': worker.name,
                     'resource_key': resource_key,
                     'assigned_at': utc_now().isoformat(),
+                    'route': {
+                        'tier': decision.tier,
+                        'adapter_profile': decision.adapter_profile,
+                        'reason': decision.reason,
+                    },
                 },
                 severity='info',
                 task_id=task.id,
@@ -108,6 +120,10 @@ class OrchestratorEngine:
                     'agent_id': worker.id,
                     'agent_name': worker.name,
                     'resource_key': resource_key,
+                    'route': {
+                        'tier': decision.tier,
+                        'adapter_profile': decision.adapter_profile,
+                    },
                 }
             )
 

@@ -52,8 +52,11 @@ services:
       REPO_MESH_LOCAL_TOKEN: ${REPO_MESH_LOCAL_TOKEN:-repomesh-local-token}
       API_HOST: 0.0.0.0
       API_PORT: 8787
+      ADAPTER_WORKSPACE_ROOT: ${ADAPTER_WORKSPACE_ROOT:-/workspace/target-repo}
     ports:
       - "${API_PORT:-8787}:8787"
+    volumes:
+      - ${TARGET_REPO_HOST_PATH:-../..}:/workspace/target-repo
     depends_on:
       postgres:
         condition: service_healthy

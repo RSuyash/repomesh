@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 
 def _headers() -> dict[str, str]:
@@ -847,3 +848,366 @@ def test_websocket_push_delivers_filtered_event(client):
         assert item['recipient_id'] == recipient_id
         assert item['channel'] == 'ws-work'
         assert item['payload']['content'] == 'hello via ws'
+
+
+def test_orchestrator_tick_auto_assigns_pending_task(client):
+    worker = client.post(
+        '/v1/agents/register',
+        headers=_headers(),
+        json={'name': 'orchestrator-worker', 'type': 'cli', 'capabilities': {'execute': True}},
+    )
+    assert worker.status_code == 200
+    worker_id = worker.json()['id']
+
+    task = client.post(
+        '/v1/tasks',
+        headers=_headers(),
+        json={
+            'goal': 'auto assign by orchestrator',
+            'description': 'runtime should claim and route',
+            'scope': {'files': ['apps/api/app/api/events.py']},
+            'priority': 5,
+        },
+    )
+    assert task.status_code == 200
+    task_id = task.json()['id']
+
+    tick = client.post('/v1/orchestrator/tick?max_assignments=5', headers=_headers())
+    assert tick.status_code == 200
+    payload = tick.json()
+    assert payload['assignments']
+    assert any(item['task_id'] == task_id for item in payload['assignments'])
+
+    tasks = client.get('/v1/tasks', headers=_headers(), params={'assignee': worker_id})
+    assert tasks.status_code == 200
+    matched = [item for item in tasks.json() if item['id'] == task_id]
+    assert matched
+    assert matched[0]['status'] == 'in_progress'
+
+    events = client.get('/v1/events', headers=_headers(), params={'type': 'orchestrator.assignment', 'task_id': task_id, 'limit': 5})
+    assert events.status_code == 200
+    assert len(events.json()) == 1
+
+
+def test_mcp_orchestrator_tools_tick_and_status(client):
+    worker = client.post(
+        '/v1/agents/register',
+        headers=_headers(),
+        json={'name': 'mcp-orchestrator-worker', 'type': 'cli', 'capabilities': {'execute': True}},
+    )
+    assert worker.status_code == 200
+
+    task = client.post(
+        '/v1/tasks',
+        headers=_headers(),
+        json={'goal': 'mcp orchestrator tick', 'description': 'route via mcp', 'scope': {'component': 'api'}, 'priority': 4},
+    )
+    assert task.status_code == 200
+    task_id = task.json()['id']
+
+    tick = client.post(
+        '/mcp/http',
+        headers=_headers(),
+        json={
+            'jsonrpc': '2.0',
+            'id': 'orch1',
+            'method': 'tool.call',
+            'params': {'name': 'orchestrator.tick', 'arguments': {'max_assignments': 3}},
+        },
+    )
+    assert tick.status_code == 200
+    result = tick.json()['result']
+    assert any(item['task_id'] == task_id for item in result['assignments'])
+
+    status = client.post(
+        '/mcp/http',
+        headers=_headers(),
+        json={'jsonrpc': '2.0', 'id': 'orch2', 'method': 'tool.call', 'params': {'name': 'orchestrator.status', 'arguments': {}}},
+    )
+    assert status.status_code == 200
+    assert 'running' in status.json()['result']
+
+
+def test_adapter_execute_completes_assigned_task(client):
+    worker = client.post(
+        '/v1/agents/register',
+        headers=_headers(),
+        json={'name': 'adapter-worker', 'type': 'cli', 'capabilities': {'execute': True}},
+    )
+    assert worker.status_code == 200
+    worker_id = worker.json()['id']
+
+    task = client.post(
+        '/v1/tasks',
+        headers=_headers(),
+        json={
+            'goal': 'adapter execution',
+            'description': 'generic shell should run',
+            'scope': {'command': 'python -c "print(\'adapter-ok\')"', 'cwd': '.'},
+            'priority': 3,
+        },
+    )
+    assert task.status_code == 200
+    task_id = task.json()['id']
+
+    claim = client.post(
+        f'/v1/tasks/{task_id}/claim',
+        headers=_headers(),
+        json={'agent_id': worker_id, 'resource_key': f'task://{task_id}', 'lease_ttl': 120},
+    )
+    assert claim.status_code == 200
+
+    run = client.post(f'/v1/adapters/execute?agent_id={worker_id}&task_id={task_id}', headers=_headers())
+    assert run.status_code == 200
+    payload = run.json()
+    assert len(payload['executed']) == 1
+    assert payload['executed'][0]['status'] == 'completed'
+
+    tasks = client.get('/v1/tasks', headers=_headers(), params={'assignee': worker_id})
+    assert tasks.status_code == 200
+    matched = [item for item in tasks.json() if item['id'] == task_id]
+    assert matched
+    assert matched[0]['status'] == 'completed'
+
+    events = client.get(
+        '/v1/events',
+        headers=_headers(),
+        params={'task_id': task_id, 'type': 'adapter.execution.completed', 'channel': 'execution', 'limit': 5},
+    )
+    assert events.status_code == 200
+    assert len(events.json()) == 1
+
+
+def test_mcp_adapter_execute_tool(client):
+    worker = client.post(
+        '/v1/agents/register',
+        headers=_headers(),
+        json={'name': 'mcp-adapter-worker', 'type': 'cli', 'capabilities': {'execute': True}},
+    )
+    assert worker.status_code == 200
+    worker_id = worker.json()['id']
+
+    task = client.post(
+        '/v1/tasks',
+        headers=_headers(),
+        json={'goal': 'mcp adapter execute', 'description': 'run via mcp', 'scope': {'command': 'python -c "print(123)"'}},
+    )
+    assert task.status_code == 200
+    task_id = task.json()['id']
+
+    claim = client.post(
+        f'/v1/tasks/{task_id}/claim',
+        headers=_headers(),
+        json={'agent_id': worker_id, 'resource_key': f'task://{task_id}', 'lease_ttl': 120},
+    )
+    assert claim.status_code == 200
+
+    run = client.post(
+        '/mcp/http',
+        headers=_headers(),
+        json={
+            'jsonrpc': '2.0',
+            'id': 'adapter1',
+            'method': 'tool.call',
+            'params': {
+                'name': 'adapter.execute',
+                'arguments': {'agent_id': worker_id, 'task_id': task_id, 'max_tasks': 1},
+            },
+        },
+    )
+    assert run.status_code == 200
+    result = run.json()['result']
+    assert len(result['executed']) == 1
+    assert result['executed'][0]['task_id'] == task_id
+    assert result['executed'][0]['status'] == 'completed'
+
+
+def test_mcp_file_skeleton_and_symbol_logic_tools(client):
+    skeleton = client.post(
+        '/mcp/http',
+        headers=_headers(),
+        json={
+            'jsonrpc': '2.0',
+            'id': 'fs1',
+            'method': 'tool.call',
+            'params': {'name': 'file.skeleton', 'arguments': {'file_path': 'apps/api/app/api/events.py'}},
+        },
+    )
+    assert skeleton.status_code == 200
+    result = skeleton.json()['result']
+    assert result['language'] == 'python'
+    assert any(item.get('name') == 'list_events' for item in result['symbols'])
+
+    symbol = client.post(
+        '/mcp/http',
+        headers=_headers(),
+        json={
+            'jsonrpc': '2.0',
+            'id': 'fs2',
+            'method': 'tool.call',
+            'params': {'name': 'file.symbol_logic', 'arguments': {'file_path': 'apps/api/app/api/events.py', 'symbol_name': 'list_events'}},
+        },
+    )
+    assert symbol.status_code == 200
+    payload = symbol.json()['result']
+    assert payload['kind'] == 'function'
+    assert 'def list_events(' in payload['source']
+
+
+def test_mcp_file_search_replace_strict_tool(client):
+    temp_dir = Path('apps/api/tests/_tmp')
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    target = temp_dir / 'search_replace_sample.py'
+    target.write_text("value = 1\nvalue = 1\n", encoding='utf-8')
+
+    mismatch = client.post(
+        '/mcp/http',
+        headers=_headers(),
+        json={
+            'jsonrpc': '2.0',
+            'id': 'sr1',
+            'method': 'tool.call',
+            'params': {
+                'name': 'file.search_replace',
+                'arguments': {'file_path': str(target), 'search': 'value = 1', 'replace': 'value = 2', 'expected_count': 1},
+            },
+        },
+    )
+    assert mismatch.status_code == 200
+    assert mismatch.json()['error']['code'] == 'VALIDATION_ERROR'
+
+    exact = client.post(
+        '/mcp/http',
+        headers=_headers(),
+        json={
+            'jsonrpc': '2.0',
+            'id': 'sr2',
+            'method': 'tool.call',
+            'params': {
+                'name': 'file.search_replace',
+                'arguments': {'file_path': str(target), 'search': 'value = 1\nvalue = 1', 'replace': 'value = 2\nvalue = 2', 'expected_count': 1},
+            },
+        },
+    )
+    assert exact.status_code == 200
+    assert exact.json()['result']['replaced_count'] == 1
+    assert 'value = 2' in target.read_text(encoding='utf-8')
+
+
+def test_adapter_prepass_retry_succeeds_before_failure(client):
+    worker = client.post(
+        '/v1/agents/register',
+        headers=_headers(),
+        json={'name': 'prepass-worker', 'type': 'cli', 'capabilities': {'execute': True}},
+    )
+    assert worker.status_code == 200
+    worker_id = worker.json()['id']
+
+    temp_dir = Path('apps/api/tests/_tmp')
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    source_file = temp_dir / 'retry_bad.py'
+    source_file.write_text('BAD\n', encoding='utf-8')
+    source_ref = source_file.as_posix()
+
+    task = client.post(
+        '/v1/tasks',
+        headers=_headers(),
+        json={
+            'goal': 'prepass retry',
+            'description': 'fail then deterministic fix',
+                'scope': {
+                    'command': f'python -c "from pathlib import Path; import sys; txt=Path(\'{source_ref}\').read_text(encoding=\'utf-8\'); sys.exit(0 if \'GOOD\' in txt else 1)"',
+                    'prepass_commands': [f'python -c "from pathlib import Path; Path(\'{source_ref}\').write_text(\'GOOD\\\\n\', encoding=\'utf-8\')"'],
+                    'cwd': '.',
+                },
+            },
+    )
+    assert task.status_code == 200
+    task_id = task.json()['id']
+
+    claim = client.post(
+        f'/v1/tasks/{task_id}/claim',
+        headers=_headers(),
+        json={'agent_id': worker_id, 'resource_key': f'task://{task_id}', 'lease_ttl': 120},
+    )
+    assert claim.status_code == 200
+
+    run = client.post(f'/v1/adapters/execute?agent_id={worker_id}&task_id={task_id}', headers=_headers())
+    assert run.status_code == 200
+    executed = run.json()['executed']
+    assert executed
+    assert executed[0]['status'] == 'completed'
+
+    events = client.get(
+        '/v1/events',
+        headers=_headers(),
+        params={'task_id': task_id, 'type': 'adapter.execution.retried_success', 'limit': 5},
+    )
+    assert events.status_code == 200
+    assert len(events.json()) == 1
+
+
+def test_orchestrator_assignment_contains_route_policy(client):
+    worker = client.post(
+        '/v1/agents/register',
+        headers=_headers(),
+        json={'name': 'route-worker', 'type': 'cli', 'capabilities': {'model_tiers': ['frontier'], 'adapter_profiles': ['generic-shell']}},
+    )
+    assert worker.status_code == 200
+
+    task = client.post(
+        '/v1/tasks',
+        headers=_headers(),
+        json={'goal': 'route me', 'description': 'policy should set frontier', 'priority': 5, 'scope': {}},
+    )
+    assert task.status_code == 200
+    task_id = task.json()['id']
+
+    tick = client.post('/v1/orchestrator/tick?max_assignments=5', headers=_headers())
+    assert tick.status_code == 200
+    assert any(item['task_id'] == task_id for item in tick.json()['assignments'])
+
+    events = client.get('/v1/events', headers=_headers(), params={'task_id': task_id, 'type': 'orchestrator.assignment', 'limit': 5})
+    assert events.status_code == 200
+    route = events.json()[0]['payload']['route']
+    assert route['tier'] == 'frontier'
+    assert route['adapter_profile'] == 'generic-shell'
+
+
+def test_summarizer_tick_compresses_completed_task_history(client):
+    worker = client.post(
+        '/v1/agents/register',
+        headers=_headers(),
+        json={'name': 'summarizer-worker', 'type': 'cli', 'capabilities': {'execute': True}},
+    )
+    assert worker.status_code == 200
+    worker_id = worker.json()['id']
+
+    task = client.post(
+        '/v1/tasks',
+        headers=_headers(),
+        json={'goal': 'summarize me', 'description': 'will be compressed', 'scope': {'command': 'python -c "print(1)"'}},
+    )
+    assert task.status_code == 200
+    task_id = task.json()['id']
+
+    claim = client.post(
+        f'/v1/tasks/{task_id}/claim',
+        headers=_headers(),
+        json={'agent_id': worker_id, 'resource_key': f'task://{task_id}', 'lease_ttl': 120},
+    )
+    assert claim.status_code == 200
+    run = client.post(f'/v1/adapters/execute?agent_id={worker_id}&task_id={task_id}', headers=_headers())
+    assert run.status_code == 200
+
+    summary = client.post(
+        '/mcp/http',
+        headers=_headers(),
+        json={'jsonrpc': '2.0', 'id': 'sum1', 'method': 'tool.call', 'params': {'name': 'summarizer.tick', 'arguments': {'max_tasks': 20}}},
+    )
+    assert summary.status_code == 200
+    assert summary.json()['result']['count'] >= 1
+
+    events = client.get('/v1/events', headers=_headers(), params={'task_id': task_id, 'type': 'summary.task', 'channel': 'summary', 'limit': 5})
+    assert events.status_code == 200
+    assert len(events.json()) == 1
