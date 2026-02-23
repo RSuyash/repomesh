@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.models.entities import ResourceLock, Task, TaskClaim
 from app.repositories.common import utc_now
 from app.services.errors import AppError, ERROR_CONFLICT, ERROR_NOT_FOUND, ERROR_VALIDATION
+from app.services.locks import LockService
 
 ALLOWED_STATUSES = {'pending', 'claimed', 'in_progress', 'blocked', 'completed', 'stalled'}
 
@@ -60,11 +61,9 @@ class TaskService:
         ).scalars().first()
 
         if not lock:
-            raise AppError(
-                code=ERROR_VALIDATION,
-                message='Task claim requires an active lock owned by the same agent',
-                status_code=400,
-            )
+            # Auto-acquire the requested resource lock for this claim to reduce
+            # claim friction while preserving single-owner lock semantics.
+            lock = LockService(self.db).acquire(resource_key=resource_key, agent_id=agent_id, ttl=lease_ttl)
 
         self.expire_stale_claims(task_id)
         active_claim = self.db.execute(

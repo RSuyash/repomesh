@@ -12,6 +12,10 @@ Auth: `x-repomesh-token: <token>` or `Authorization: Bearer <token>`
 - `POST /v1/agents/{agent_id}/heartbeat`
 - `GET /v1/agents`
 
+`POST /v1/agents/register` optional fields:
+- `reuse_existing` (default `true`): idempotent registration by `(repo_id, name)`
+- `takeover_if_stale` (default `true`): reclaim stale/inactive identity
+
 ## Tasks
 - `POST /v1/tasks`
 - `GET /v1/tasks`

@@ -41,10 +41,26 @@ node apps/cli/dist/index.js mcp --client qwen
 Then run setup:
 
 ```powershell
+qwen mcp remove hivemind
 qwen mcp remove repomesh-stdio
 qwen mcp add repomesh-stdio python scripts/repomesh_mcp_stdio.py
 qwen mcp list
 ```
+
+Notes:
+- `hivemind` is not part of RepoMesh and can cause noisy discovery errors in this workflow.
+- Keep only RepoMesh MCP entries for this repo session.
+
+## Codex
+
+Print Codex-oriented setup note:
+
+```powershell
+node apps/cli/dist/index.js mcp --client codex
+```
+
+Then configure Codex MCP to use `.repomesh/mcp-servers.json` as the source of truth.
+If your Codex config already has unrelated servers (for example `hivemind`), remove them for this repo to avoid startup/discovery noise.
 
 ## Other MCP clients
 

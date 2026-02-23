@@ -17,6 +17,8 @@ def register_agent(payload: AgentRegisterRequest, db: Session = Depends(get_db_s
         agent_type=payload.type,
         capabilities=payload.capabilities,
         repo_id=payload.repo_id,
+        reuse_existing=payload.reuse_existing,
+        takeover_if_stale=payload.takeover_if_stale,
     )
     return AgentResponse.model_validate(agent, from_attributes=True)
 

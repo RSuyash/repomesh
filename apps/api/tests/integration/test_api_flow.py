@@ -495,3 +495,355 @@ def test_mcp_event_thread_returns_root_and_replies(client):
     assert thread.status_code == 200
     items = thread.json()['result']['items']
     assert [item['payload']['content'] for item in items] == ['mcp-root', 'mcp-reply']
+
+
+def test_event_log_routes_from_payload_aliases_via_rest(client):
+    sender = client.post(
+        '/v1/agents/register',
+        headers=_headers(),
+        json={'name': 'alias-rest-sender', 'type': 'cli', 'capabilities': {}},
+    )
+    recipient = client.post(
+        '/v1/agents/register',
+        headers=_headers(),
+        json={'name': 'alias-rest-recipient', 'type': 'cli', 'capabilities': {}},
+    )
+    assert sender.status_code == 200
+    assert recipient.status_code == 200
+    sender_id = sender.json()['id']
+    recipient_id = recipient.json()['id']
+
+    event = client.post(
+        '/v1/events',
+        headers=_headers(),
+        json={
+            'type': 'chat.message',
+            'agent_id': sender_id,
+            'payload': {
+                'to': 'alias-rest-recipient',
+                'channel': 'orchestration',
+                'content': 'payload-routed',
+            },
+        },
+    )
+    assert event.status_code == 200
+    body = event.json()
+    assert body['recipient_id'] == recipient_id
+    assert body['channel'] == 'orchestration'
+
+
+def test_event_log_routes_from_payload_aliases_via_mcp(client):
+    sender = client.post(
+        '/v1/agents/register',
+        headers=_headers(),
+        json={'name': 'alias-mcp-sender', 'type': 'cli', 'capabilities': {}},
+    )
+    recipient = client.post(
+        '/v1/agents/register',
+        headers=_headers(),
+        json={'name': 'alias-mcp-recipient', 'type': 'cli', 'capabilities': {}},
+    )
+    assert sender.status_code == 200
+    assert recipient.status_code == 200
+    sender_id = sender.json()['id']
+    recipient_id = recipient.json()['id']
+
+    log = client.post(
+        '/mcp/http',
+        headers=_headers(),
+        json={
+            'jsonrpc': '2.0',
+            'id': 'alias1',
+            'method': 'tool.call',
+            'params': {
+                'name': 'event.log',
+                'arguments': {
+                    'type': 'chat.message',
+                    'agent_id': sender_id,
+                    'payload': {
+                        'to': 'alias-mcp-recipient',
+                        'channel': 'orchestration',
+                        'content': 'payload-routed',
+                    },
+                },
+            },
+        },
+    )
+    assert log.status_code == 200
+
+    inbox = client.post(
+        '/mcp/http',
+        headers=_headers(),
+        json={
+            'jsonrpc': '2.0',
+            'id': 'alias2',
+            'method': 'tool.call',
+            'params': {
+                'name': 'event.inbox',
+                'arguments': {
+                    'recipient_id': recipient_id,
+                    'channel': 'orchestration',
+                    'include_payload': True,
+                    'limit': 10,
+                },
+            },
+        },
+    )
+    assert inbox.status_code == 200
+    result = inbox.json()['result']
+    assert result['count'] == 1
+    assert result['items'][0]['recipient_id'] == recipient_id
+    assert result['items'][0]['channel'] == 'orchestration'
+
+
+def test_event_log_reply_to_alias_sets_parent_message_id(client):
+    sender = client.post(
+        '/v1/agents/register',
+        headers=_headers(),
+        json={'name': 'replyto-sender', 'type': 'cli', 'capabilities': {}},
+    )
+    recipient = client.post(
+        '/v1/agents/register',
+        headers=_headers(),
+        json={'name': 'replyto-recipient', 'type': 'cli', 'capabilities': {}},
+    )
+    assert sender.status_code == 200
+    assert recipient.status_code == 200
+    sender_id = sender.json()['id']
+    recipient_id = recipient.json()['id']
+
+    root = client.post(
+        '/mcp/http',
+        headers=_headers(),
+        json={
+            'jsonrpc': '2.0',
+            'id': 'replyto1',
+            'method': 'tool.call',
+            'params': {
+                'name': 'event.log',
+                'arguments': {
+                    'type': 'chat.message',
+                    'agent_id': sender_id,
+                    'payload': {'to': recipient_id, 'channel': 'work', 'content': 'root'},
+                },
+            },
+        },
+    )
+    assert root.status_code == 200
+    root_id = root.json()['result']['id']
+
+    reply = client.post(
+        '/mcp/http',
+        headers=_headers(),
+        json={
+            'jsonrpc': '2.0',
+            'id': 'replyto2',
+            'method': 'tool.call',
+            'params': {
+                'name': 'event.log',
+                'arguments': {
+                    'type': 'chat.message',
+                    'agent_id': sender_id,
+                    'payload': {'to': recipient_id, 'channel': 'work', 'reply_to': root_id, 'content': 'reply'},
+                },
+            },
+        },
+    )
+    assert reply.status_code == 200
+    reply_id = reply.json()['result']['id']
+
+    events = client.get('/v1/events', headers=_headers(), params={'agent_id': sender_id, 'limit': 20})
+    assert events.status_code == 200
+    matched = [item for item in events.json() if item['id'] == reply_id]
+    assert matched
+    assert matched[0]['parent_message_id'] == root_id
+
+
+def test_mcp_http_returns_jsonrpc_error_on_missing_method(client):
+    resp = client.post(
+        '/mcp/http',
+        headers=_headers(),
+        json={
+            'jsonrpc': '2.0',
+            'id': 'bad1',
+            'params': {'name': 'task.list', 'arguments': {}},
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body['id'] == 'bad1'
+    assert body['error']['code'] == 'VALIDATION_ERROR'
+    assert 'method' in body['error']['message']
+
+
+def test_mcp_task_claim_auto_acquires_lock(client):
+    agent = client.post(
+        '/v1/agents/register',
+        headers=_headers(),
+        json={'name': 'claim-auto-lock-agent', 'type': 'cli', 'capabilities': {}},
+    )
+    assert agent.status_code == 200
+    agent_id = agent.json()['id']
+
+    task = client.post(
+        '/v1/tasks',
+        headers=_headers(),
+        json={'goal': 'auto-lock claim', 'description': 'validate claim', 'scope': {}},
+    )
+    assert task.status_code == 200
+    task_id = task.json()['id']
+
+    claim = client.post(
+        '/mcp/http',
+        headers=_headers(),
+        json={
+            'jsonrpc': '2.0',
+            'id': 'claim1',
+            'method': 'tool.call',
+            'params': {
+                'name': 'task.claim',
+                'arguments': {
+                    'task_id': task_id,
+                    'agent_id': agent_id,
+                    'resource_key': f'task://{task_id}',
+                    'lease_ttl': 120,
+                },
+            },
+        },
+    )
+    assert claim.status_code == 200
+    result = claim.json()['result']
+    assert result['task_id'] == task_id
+    assert result['agent_id'] == agent_id
+    assert result['state'] == 'active'
+
+    tasks = client.get('/v1/tasks', headers=_headers(), params={'status': 'claimed'})
+    assert tasks.status_code == 200
+    claimed = [item for item in tasks.json() if item['id'] == task_id]
+    assert claimed
+
+
+def test_events_list_supports_payload_contains_filter(client):
+    sender = client.post(
+        '/v1/agents/register',
+        headers=_headers(),
+        json={'name': 'payload-filter-sender', 'type': 'cli', 'capabilities': {}},
+    )
+    assert sender.status_code == 200
+    sender_id = sender.json()['id']
+
+    first = client.post(
+        '/v1/events',
+        headers=_headers(),
+        json={
+            'type': 'chat.message',
+            'agent_id': sender_id,
+            'channel': 'search',
+            'payload': {'content': 'database timeout in worker'},
+        },
+    )
+    second = client.post(
+        '/v1/events',
+        headers=_headers(),
+        json={
+            'type': 'chat.message',
+            'agent_id': sender_id,
+            'channel': 'search',
+            'payload': {'content': 'deploy succeeded'},
+        },
+    )
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    result = client.get(
+        '/v1/events',
+        headers=_headers(),
+        params={'channel': 'search', 'payload_contains': 'timeout', 'limit': 20},
+    )
+    assert result.status_code == 200
+    items = result.json()
+    assert len(items) == 1
+    assert 'timeout' in items[0]['payload']['content']
+
+
+def test_mcp_event_list_supports_payload_contains_filter(client):
+    sender = client.post(
+        '/v1/agents/register',
+        headers=_headers(),
+        json={'name': 'payload-mcp-sender', 'type': 'cli', 'capabilities': {}},
+    )
+    assert sender.status_code == 200
+    sender_id = sender.json()['id']
+
+    log = client.post(
+        '/mcp/http',
+        headers=_headers(),
+        json={
+            'jsonrpc': '2.0',
+            'id': 'pl1',
+            'method': 'tool.call',
+            'params': {
+                'name': 'event.log',
+                'arguments': {
+                    'type': 'chat.message',
+                    'agent_id': sender_id,
+                    'channel': 'search-mcp',
+                    'payload': {'content': 'error: missing lock owner'},
+                },
+            },
+        },
+    )
+    assert log.status_code == 200
+
+    listed = client.post(
+        '/mcp/http',
+        headers=_headers(),
+        json={
+            'jsonrpc': '2.0',
+            'id': 'pl2',
+            'method': 'tool.call',
+            'params': {
+                'name': 'event.list',
+                'arguments': {'channel': 'search-mcp', 'payload_contains': 'lock owner', 'include_payload': True, 'limit': 10},
+            },
+        },
+    )
+    assert listed.status_code == 200
+    result = listed.json()['result']
+    assert result['count'] == 1
+    assert 'lock owner' in result['items'][0]['payload']['content']
+
+
+def test_websocket_push_delivers_filtered_event(client):
+    sender = client.post(
+        '/v1/agents/register',
+        headers=_headers(),
+        json={'name': 'ws-sender', 'type': 'cli', 'capabilities': {}},
+    )
+    recipient = client.post(
+        '/v1/agents/register',
+        headers=_headers(),
+        json={'name': 'ws-recipient', 'type': 'cli', 'capabilities': {}},
+    )
+    assert sender.status_code == 200
+    assert recipient.status_code == 200
+    sender_id = sender.json()['id']
+    recipient_id = recipient.json()['id']
+
+    with client.websocket_connect(f'/v1/events/ws?token=test-token&recipient_id={recipient_id}&channel=ws-work') as ws:
+        sent = client.post(
+            '/v1/events',
+            headers=_headers(),
+            json={
+                'type': 'chat.message',
+                'agent_id': sender_id,
+                'recipient_id': recipient_id,
+                'channel': 'ws-work',
+                'payload': {'content': 'hello via ws'},
+            },
+        )
+        assert sent.status_code == 200
+        item = ws.receive_json()
+        assert item['recipient_id'] == recipient_id
+        assert item['channel'] == 'ws-work'
+        assert item['payload']['content'] == 'hello via ws'

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import or_, select
+from sqlalchemy import String, cast, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.entities import Event
@@ -50,6 +50,7 @@ class EventService:
         recipient_id: str | None = None,
         parent_message_id: str | None = None,
         channel: str | None = None,
+        payload_contains: str | None = None,
         include_broadcast: bool = False,
         since: datetime | None = None,
         before: datetime | None = None,
@@ -72,6 +73,8 @@ class EventService:
             stmt = stmt.where(Event.parent_message_id == parent_message_id)
         if channel:
             stmt = stmt.where(Event.channel == channel)
+        if payload_contains:
+            stmt = stmt.where(cast(Event.payload, String).ilike(f'%{payload_contains}%'))
         if since:
             stmt = stmt.where(Event.created_at > since)
         if before:

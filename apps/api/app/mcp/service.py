@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.entities import Agent
 from app.services.agents import AgentService
 from app.services.context import ContextService
 from app.services.errors import AppError, ERROR_VALIDATION
@@ -104,8 +106,8 @@ TOOL_DEFINITIONS = [
     {'name': 'lock.renew', 'description': 'Renew a lock.', 'inputSchema': {'type': 'object', 'required': ['lock_id', 'agent_id'], 'properties': {'lock_id': {'type': 'string'}, 'agent_id': {'type': 'string'}, 'ttl': {'type': 'integer'}}}},
     {'name': 'lock.release', 'description': 'Release a lock.', 'inputSchema': {'type': 'object', 'required': ['lock_id', 'agent_id'], 'properties': {'lock_id': {'type': 'string'}, 'agent_id': {'type': 'string'}}}},
     {'name': 'event.log', 'description': 'Log an event.', 'inputSchema': {'type': 'object', 'required': ['type'], 'properties': {'type': {'type': 'string'}, 'payload': {'type': 'object'}, 'severity': {'type': 'string'}, 'task_id': {'type': ['string', 'null']}, 'agent_id': {'type': ['string', 'null']}, 'repo_id': {'type': ['string', 'null']}, 'recipient_id': {'type': ['string', 'null']}, 'parent_message_id': {'type': ['string', 'null']}, 'channel': {'type': ['string', 'null']}}}},
-    {'name': 'event.list', 'description': 'List events with optional inbox/polling filters.', 'inputSchema': {'type': 'object', 'properties': {'task_id': {'type': ['string', 'null']}, 'agent_id': {'type': ['string', 'null']}, 'recipient_id': {'type': ['string', 'null']}, 'parent_message_id': {'type': ['string', 'null']}, 'channel': {'type': ['string', 'null']}, 'type': {'type': ['string', 'null']}, 'since': {'type': ['string', 'null'], 'description': 'ISO timestamp; return events strictly after this value'}, 'before': {'type': ['string', 'null'], 'description': 'ISO timestamp; return events strictly before this value'}, 'direction': {'type': 'string', 'enum': ['asc', 'desc']}, 'include_broadcast': {'type': 'boolean'}, 'include_payload': {'type': 'boolean'}, 'limit': {'type': 'integer'}}}},
-    {'name': 'event.inbox', 'description': 'List events addressed to a recipient (and optionally broadcast).', 'inputSchema': {'type': 'object', 'required': ['recipient_id'], 'properties': {'recipient_id': {'type': 'string'}, 'channel': {'type': ['string', 'null']}, 'type': {'type': ['string', 'null']}, 'since': {'type': ['string', 'null'], 'description': 'ISO timestamp; return events strictly after this value'}, 'before': {'type': ['string', 'null']}, 'direction': {'type': 'string', 'enum': ['asc', 'desc']}, 'include_broadcast': {'type': 'boolean'}, 'include_payload': {'type': 'boolean'}, 'limit': {'type': 'integer'}}}},
+    {'name': 'event.list', 'description': 'List events with optional inbox/polling filters.', 'inputSchema': {'type': 'object', 'properties': {'task_id': {'type': ['string', 'null']}, 'agent_id': {'type': ['string', 'null']}, 'recipient_id': {'type': ['string', 'null']}, 'parent_message_id': {'type': ['string', 'null']}, 'channel': {'type': ['string', 'null']}, 'payload_contains': {'type': ['string', 'null']}, 'type': {'type': ['string', 'null']}, 'since': {'type': ['string', 'null'], 'description': 'ISO timestamp; return events strictly after this value'}, 'before': {'type': ['string', 'null'], 'description': 'ISO timestamp; return events strictly before this value'}, 'direction': {'type': 'string', 'enum': ['asc', 'desc']}, 'include_broadcast': {'type': 'boolean'}, 'include_payload': {'type': 'boolean'}, 'limit': {'type': 'integer'}}}},
+    {'name': 'event.inbox', 'description': 'List events addressed to a recipient (and optionally broadcast).', 'inputSchema': {'type': 'object', 'required': ['recipient_id'], 'properties': {'recipient_id': {'type': 'string'}, 'channel': {'type': ['string', 'null']}, 'payload_contains': {'type': ['string', 'null']}, 'type': {'type': ['string', 'null']}, 'since': {'type': ['string', 'null'], 'description': 'ISO timestamp; return events strictly after this value'}, 'before': {'type': ['string', 'null']}, 'direction': {'type': 'string', 'enum': ['asc', 'desc']}, 'include_broadcast': {'type': 'boolean'}, 'include_payload': {'type': 'boolean'}, 'limit': {'type': 'integer'}}}},
     {'name': 'event.thread', 'description': 'Get a full message thread (root + replies).', 'inputSchema': {'type': 'object', 'required': ['message_id'], 'properties': {'message_id': {'type': 'string'}, 'limit': {'type': 'integer'}, 'include_payload': {'type': 'boolean'}}}},
     {'name': 'context.bundle', 'description': 'Build a compact context bundle for a task.', 'inputSchema': {'type': 'object', 'required': ['task_id'], 'properties': {'task_id': {'type': 'string'}, 'mode': {'type': 'string'}, 'include_recent': {'type': 'boolean'}}}},
 ]
@@ -165,6 +167,7 @@ class MCPToolService:
             recipient_id=force_recipient or arguments.get('recipient_id'),
             parent_message_id=arguments.get('parent_message_id'),
             channel=arguments.get('channel'),
+            payload_contains=arguments.get('payload_contains'),
             include_broadcast=bool(arguments.get('include_broadcast', force_recipient is not None)),
             since=self._parse_dt(arguments.get('since')),
             before=self._parse_dt(arguments.get('before')),
@@ -176,6 +179,44 @@ class MCPToolService:
             'items': [self._format_event(e, include_payload=include_payload) for e in events],
             'count': len(events),
             'latest_seen_at': latest_seen_at.isoformat() if latest_seen_at else arguments.get('since'),
+        }
+
+    def _resolve_agent_ref(self, *, reference: str, repo_id: str | None) -> str:
+        by_id = self.db.get(Agent, reference)
+        if by_id:
+            return by_id.id
+
+        stmt = select(Agent).where(Agent.name == reference)
+        if repo_id is not None:
+            stmt = stmt.where(Agent.repo_id == repo_id)
+        by_name = self.db.execute(stmt.order_by(Agent.created_at.desc())).scalars().first()
+        if by_name:
+            return by_name.id
+
+        raise AppError(
+            code=ERROR_VALIDATION,
+            message='Unknown recipient reference',
+            status_code=400,
+            details={'reference': reference},
+        )
+
+    def _normalize_event_log_arguments(self, arguments: dict) -> dict:
+        payload = arguments.get('payload') or {}
+        repo_id = arguments.get('repo_id')
+        recipient_ref = arguments.get('recipient_id') or payload.get('recipient_id') or payload.get('to')
+        parent_message_id = arguments.get('parent_message_id') or payload.get('parent_message_id') or payload.get('reply_to')
+        channel = arguments.get('channel') or payload.get('channel')
+
+        return {
+            'event_type': arguments['type'],
+            'payload': payload,
+            'severity': arguments.get('severity', 'info'),
+            'task_id': arguments.get('task_id'),
+            'agent_id': arguments.get('agent_id'),
+            'repo_id': repo_id,
+            'recipient_id': self._resolve_agent_ref(reference=recipient_ref, repo_id=repo_id) if recipient_ref else None,
+            'parent_message_id': parent_message_id,
+            'channel': channel,
         }
 
     def call(self, tool_name: str, arguments: dict) -> dict:
@@ -261,17 +302,7 @@ class MCPToolService:
             return {'id': lock.id, 'state': lock.state, 'released_at': lock.released_at}
 
         if tool_name == 'event.log':
-            event = self.events.log(
-                event_type=arguments['type'],
-                payload=arguments.get('payload', {}),
-                severity=arguments.get('severity', 'info'),
-                task_id=arguments.get('task_id'),
-                agent_id=arguments.get('agent_id'),
-                repo_id=arguments.get('repo_id'),
-                recipient_id=arguments.get('recipient_id'),
-                parent_message_id=arguments.get('parent_message_id'),
-                channel=arguments.get('channel'),
-            )
+            event = self.events.log(**self._normalize_event_log_arguments(arguments))
             return {'id': event.id, 'type': event.type, 'severity': event.severity}
 
         if tool_name == 'event.list':

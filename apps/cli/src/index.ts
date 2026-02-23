@@ -99,7 +99,7 @@ program
   .command('mcp')
   .description('Show MCP connection details')
   .option('--write', 'Write .repomesh/mcp-servers.json')
-  .option('--client <client>', 'Show client-specific hints (qwen|json)', 'json')
+  .option('--client <client>', 'Show client-specific hints (qwen|codex|json)', 'json')
   .action((options: { write?: boolean; client: string }) => {
     const { config, token } = readConfig();
     const paths = resolvePaths();
@@ -119,9 +119,15 @@ program
     if (options.client === 'qwen') {
       out.client = 'qwen';
       out.setup = {
+        remove_hivemind: hints.qwen_remove_hivemind,
         remove: 'qwen mcp remove repomesh-stdio',
         add: hints.qwen_add,
         test: hints.qwen_test
+      };
+    } else if (options.client === 'codex') {
+      out.client = 'codex';
+      out.setup = {
+        note: hints.codex_note
       };
     } else {
       out.client = 'json';

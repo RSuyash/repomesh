@@ -49,9 +49,12 @@ export function writeMcpConfig(paths: RepoMeshPaths, config: McpServersConfig): 
 export function mcpClientHints(repoRoot: string): Record<string, string> {
   const launcher = path.join(repoRoot, 'scripts', 'repomesh_mcp_stdio.py');
   return {
+    qwen_remove_hivemind: 'qwen mcp remove hivemind',
     qwen_add: `qwen mcp add repomesh-stdio python "${launcher}"`,
     qwen_test:
       'qwen -p "Call task.list from repomesh-stdio and return only JSON." --allowed-mcp-server-names repomesh-stdio --output-format json',
+    codex_note:
+      'Use .repomesh/mcp-servers.json directly in Codex MCP config and remove any unrelated servers such as hivemind.',
     json_note:
       'Use .repomesh/mcp-servers.json in any client that accepts MCP mcpServers JSON directly (Codex/Gemini-compatible clients).'
   };
